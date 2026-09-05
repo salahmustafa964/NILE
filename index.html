@@ -343,7 +343,22 @@ document.getElementById('fileInput').addEventListener('change', (e)=>{
       }
       canvas.width = width; canvas.height = height;
       canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-      imageBase64 = canvas.toDataURL('image/jpeg', 0.6);
+      let quality = 0.6;
+      let dataUrl = canvas.toDataURL('image/jpeg', quality);
+      // مستندات Firestore محدودة بـ 1 ميجابايت — نقلل الجودة تدريجياً لو الصورة لسه كبيرة بعد الضغط الأول
+      while(dataUrl.length > 700000 && quality > 0.25){
+        quality -= 0.15;
+        dataUrl = canvas.toDataURL('image/jpeg', quality);
+      }
+      if(dataUrl.length > 900000){
+        alert('الصورة كبيرة جداً حتى بعد الضغط، الرجاء اختيار صورة أصغر أو التقاط لقطة شاشة بدل صورة كاملة الدقة. سيتم إرسال البلاغ بدون الصورة.');
+        imageBase64 = null;
+        document.getElementById('previewWrap').style.display = 'none';
+        document.getElementById('fileDrop').style.display = 'block';
+        document.getElementById('fileInput').value = '';
+        return;
+      }
+      imageBase64 = dataUrl;
       document.getElementById('previewImg').src = imageBase64;
       document.getElementById('previewWrap').style.display = 'block';
       document.getElementById('fileDrop').style.display = 'none';
@@ -412,7 +427,7 @@ function getGeoLocation(){
 
 function esc(str){
   const d = document.createElement('div');
-  d.innerText = str;
+  d.innerText = str || '';
   return d.innerHTML;
 }
 
@@ -521,7 +536,7 @@ function listenToTicket(id){
     if(!doc.exists) return;
     const data = doc.data();
     myTicketsData[id] = data;
-    if(data.status === 'مكتمل' && data.rating === null){
+    if(data.employeeConfirmed === true && data.rating === null){
       showRatingBanner(id, data);
     }
     renderMyTickets();
@@ -639,12 +654,21 @@ async function sendEmployeeMessage(id){
   const text = input.value.trim();
   if(!text) return;
   const saved = JSON.parse(localStorage.getItem('hd_employee_info') || '{}');
-  input.value = '';
-  await db.collection('tickets').doc(id).update({
-    messages: firebase.firestore.FieldValue.arrayUnion({
-      from: 'employee', senderName: saved.employeeName || 'الموظف', text, at: new Date().toISOString()
-    })
-  });
+  const btn = document.querySelector(`[data-send="${id}"]`);
+  if(btn){ btn.disabled = true; btn.textContent = '...'; }
+  try{
+    await db.collection('tickets').doc(id).update({
+      messages: firebase.firestore.FieldValue.arrayUnion({
+        from: 'employee', senderName: saved.employeeName || 'الموظف', text, at: new Date().toISOString()
+      })
+    });
+    input.value = ''; // نمسح الخانة فقط بعد التأكد من نجاح الحفظ فعلياً
+  }catch(e){
+    console.error('sendEmployeeMessage failed:', e);
+    alert('تعذر إرسال الرسالة — تأكد من الاتصال بالإنترنت وحاول مجدداً. (' + (e.code || e.message || '') + ')');
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = 'إرسال'; }
+  }
 }
 
 function showRatingBanner(id, data){
