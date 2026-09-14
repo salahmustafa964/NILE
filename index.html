@@ -181,7 +181,6 @@
 
     <div class="error" id="registerErrorMsg"></div>
     <button class="submit" id="registerSubmitBtn">دخول</button>
-    <button id="registerCancelBtn" style="display:none; width:100%; margin-top:8px; padding:10px; background:#fff; color:var(--muted); border:1px solid var(--border); border-radius:10px; font-size:13px; cursor:pointer;">إلغاء</button>
   </div>
 
   <div id="mainApp" style="display:none;">
@@ -207,7 +206,6 @@
 
       <div id="employeeInfoBar" style="display:flex; justify-content:space-between; align-items:center; gap:8px; background:#fdf8ea; border:1px solid var(--border); padding:9px 12px; border-radius:10px; margin-bottom:14px; font-size:13px;">
         <span id="employeeInfoText"></span>
-        <button type="button" id="editProfileBtn" style="background:none; border:none; color:var(--primary); font-size:12.5px; text-decoration:underline; cursor:pointer; white-space:nowrap;">✏️ تعديل بياناتي</button>
       </div>
 
       <label>نوع المشكلة *</label>
@@ -276,6 +274,12 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
+/* =====================  رابط سيرفر الشركة (MySQL) =====================
+   حالياً بيشتغل على جهاز التطوير بس. لما سيرفر الشركة يجهز، غيّر السطر
+   دا بس (رابط واحد) وكل التطبيق يشتغل عليه تلقائياً.
+======================================================================= */
+const API_URL = 'http://localhost:4000';
+
 /* =====================  DEPARTMENTS CONFIG  =====================
    نفس هذا الكائن يجب أن يُنسخ بالضبط داخل لوحة الأدمن حتى تتطابق
    أسماء الأقسام وأنواع المشاكل بين التطبيقين.
@@ -293,9 +297,10 @@ let imageBase64 = null;
 
 /* =====================  تسجيل بيانات الموظف مرة واحدة  =====================
    أول ما يفتح الموظف التطبيق، بنطلب منو اسمو ووظيفتو الإدارية ورقم مكتبو
-   مرة واحدة بس، ونحفظها محلياً على جهازو. من بعدها التطبيق يدخلو على طول
-   من غير ما يعيد التسجيل، وبياناتو دي تترفق تلقائياً مع أي بلاغ يرسلو.
-   يقدر في أي وقت يضغط "تعديل بياناتي" لو احتاج يغيّر أي حقل.
+   مرة واحدة بس، ونحفظها محلياً على جهازو وكمان في قاعدة بيانات الشركة.
+   من بعدها التطبيق يدخلو على طول من غير ما يعيد التسجيل، وبياناتو دي
+   تترفق تلقائياً مع أي بلاغ يرسلو. تعديل البيانات بعد كدا بيبقى من
+   ناحية الإدارة بس، مش من التطبيق.
 ======================================================================= */
 function getEmployeeProfile(){
   return JSON.parse(localStorage.getItem('hd_employee_info') || '{}');
@@ -308,13 +313,11 @@ function renderEmployeeInfoBar(){
   const el = document.getElementById('employeeInfoText');
   if(el) el.textContent = `👤 ${p.employeeName} — ${p.department} — مكتب ${p.office}`;
 }
-function showRegisterView(isEdit){
-  const p = isEdit ? getEmployeeProfile() : {};
-  document.getElementById('registerName').value = p.employeeName || '';
-  document.getElementById('registerDept').value = p.department || '';
-  document.getElementById('registerOffice').value = p.office || '';
+function showRegisterView(){
+  document.getElementById('registerName').value = '';
+  document.getElementById('registerDept').value = '';
+  document.getElementById('registerOffice').value = '';
   document.getElementById('registerErrorMsg').style.display = 'none';
-  document.getElementById('registerCancelBtn').style.display = isEdit ? 'block' : 'none';
   document.getElementById('registerView').style.display = 'block';
   document.getElementById('mainApp').style.display = 'none';
 }
@@ -323,7 +326,7 @@ function showMainApp(){
   document.getElementById('registerView').style.display = 'none';
   document.getElementById('mainApp').style.display = 'block';
 }
-document.getElementById('registerSubmitBtn').addEventListener('click', ()=>{
+document.getElementById('registerSubmitBtn').addEventListener('click', async ()=>{
   const employeeName = document.getElementById('registerName').value.trim();
   const department = document.getElementById('registerDept').value.trim();
   const office = document.getElementById('registerOffice').value.trim();
@@ -333,17 +336,31 @@ document.getElementById('registerSubmitBtn').addEventListener('click', ()=>{
     errEl.style.display = 'block';
     return;
   }
-  localStorage.setItem('hd_employee_info', JSON.stringify({ employeeName, department, office }));
+  const btn = document.getElementById('registerSubmitBtn');
+  btn.disabled = true; btn.textContent = 'جارِ الحفظ...';
+  const profile = { employeeName, department, office };
+  try{
+    const resp = await fetch(`${API_URL}/api/employees/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: employeeName, department, office })
+    });
+    const data = await resp.json();
+    if(data.success) profile.employeeId = data.employeeId;
+  }catch(e){
+    // ما قدرناش نوصل السيرفر (مثلاً السيرفر لسه ما جهز) — نكمل ونحفظ محلياً بس
+    console.warn('تعذّر حفظ بيانات الموظف في السيرفر:', e);
+  }
+  localStorage.setItem('hd_employee_info', JSON.stringify(profile));
+  btn.disabled = false; btn.textContent = 'دخول';
   showMainApp();
 });
-document.getElementById('editProfileBtn').addEventListener('click', ()=> showRegisterView(true));
-document.getElementById('registerCancelBtn').addEventListener('click', ()=> showMainApp());
 
 // عند فتح التطبيق: لو بياناتو محفوظة بالفعل يدخل على طول، وإلا نطلب التسجيل
 if(isProfileComplete(getEmployeeProfile())){
   showMainApp();
 }else{
-  showRegisterView(false);
+  showRegisterView();
 }
 
 /* =====================  DEPARTMENT PICKER  ===================== */
